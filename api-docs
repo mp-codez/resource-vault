@@ -1,0 +1,196 @@
+Oozie Workflow for PPR & CEF Data Ingestion into Master Hive Table
+
+It will include all sections (overview, data sources, workflow, Spark & Hive scripts, authentication, output tables, etc.) based on your provided details:
+
+* **Hive Database:** `ti_ve_raw`
+* **HDFS Base Path:** `/user/svc-preprod/increment/aive/hte/`
+
+Before I generate the PDF, here’s the **document content preview** (for your confirmation):
+
+---
+
+# **Oozie Workflow for PPR & CEF Data Ingestion into Master Hive Table**
+
+## 1. Project Overview
+
+The objective of this workflow is to automate the ingestion of **PPR** and **CEF** experimental Excel files into the **Master Hive Table**, guided by a **Masterfile** containing column mapping and transformation logic.
+This process is managed within **Hue Oozie Workflow** using Spark and Hive actions, enabling consistent data ingestion and schema creation inside the Hive database **`ti_ve_raw`**.
+
+---
+
+## 2. Source Data Description
+
+### **a. Masterfile**
+
+* Location: `/user/svc-preprod/increment/aive/hte/masterfile.xlsx`
+* Purpose: Acts as metadata for creating Hive table schemas.
+* Contains:
+
+  * Column names for the final master table.
+  * Data source mapping (from PPR, CEF, or calculated fields).
+  * Transformation logic and unit information.
+* Usage: Read by Spark (`master_raw.py`) and Hive (`hive_master_anz.hql`) to create the Master Hive table.
+
+---
+
+### **b. PPR Datapoints File**
+
+* Location: `/user/svc-preprod/increment/aive/hte/ppr/datapoints/`
+* Content: Experiment metadata and process parameters such as `Experiment ID`, `Library ID`, `Catalyst Source`, etc.
+* Used for:
+
+  * Extracting essential attributes for Hive column creation.
+  * Feeding into Master table creation and column mapping.
+* Processed by Spark script: `datapoints_dataframe.py`.
+
+---
+
+### **c. PPR Timeseries File**
+
+* Location: `/user/svc-preprod/increment/aive/hte/ppr/timeseries/`
+* Content: Time-based measurements (e.g., pressure, temperature, uptake, etc.).
+* Used for:
+
+  * Creating a dedicated **timeseries Hive table**.
+  * Performing aggregations or transformations used in the Master table (e.g., average or peak values).
+* Processed by Spark script: `timeseriesdata_datapoints_raw.py`.
+
+---
+
+### **d. CEF File**
+
+* Location: `/user/svc-preprod/increment/aive/hte/cef/`
+* Content: Experimental chemical and process data (e.g., Dissolution time, mass, concentration, flow rate).
+* Used for:
+
+  * Enriching Master Hive table with laboratory and analytical results.
+* Processed by Spark script: `cef_results_raw.py`.
+
+---
+
+## 3. Data Flow Architecture
+
+1. Read **Excel source files (PPR, CEF, Timeseries)** from HDFS.
+2. Clean and standardize schema using Spark.
+3. Generate intermediate Hive raw tables:
+
+   * `datapoints_raw`
+   * `timeseries_raw`
+   * `cef_results_raw`
+4. Merge and transform using Masterfile mapping.
+5. Create final Hive Master table under database `ti_ve_raw`.
+
+---
+
+## 4. Oozie Workflow Design
+
+### Workflow Name:
+
+`ppr_cef_data_ingestion_into_master_table`
+
+### Components (in Hue):
+
+| Order | Type        | Action Name          | Script                           | Description                                                      |
+| ----- | ----------- | -------------------- | -------------------------------- | ---------------------------------------------------------------- |
+| 1     | Spark       | datapoints_dataframe | datapoints_dataframe.py          | Reads and cleans PPR datapoints file                             |
+| 2     | Spark       | timeseries           | timeseriesdata_datapoints_raw.py | Reads PPR timeseries and prepares raw Hive table                 |
+| 3     | Spark       | cef_results_raw      | cef_results_raw.py               | Reads and cleans CEF data                                        |
+| 4     | HiveServer2 | hive_timeseries_anz  | hive_timeseries_anz.hql          | Creates `timeseries_raw` Hive table                              |
+| 5     | Spark       | master_raw           | master_raw.py                    | Joins PPR, CEF, and Timeseries data based on Masterfile mappings |
+| 6     | HiveServer2 | hive_master_anz      | hive_master_anz.hql              | Creates final `masterfile` Hive table in `ti_ve_raw`             |
+
+### Workflow Summary:
+
+* Initiates sequential Spark and Hive actions.
+* Spark jobs handle Excel ingestion, transformations, and joins.
+* Hive actions handle table creation and storage into HDFS.
+* Authentication managed via Kerberos keytab.
+
+---
+
+## 5. Spark Script Descriptions
+
+### `datapoints_dataframe.py`
+
+* Reads PPR datapoints Excel files using `spark.read.format("com.crealytics.spark.excel")`.
+* Performs schema inference and null handling.
+* Writes cleaned data to Hive-managed table `ti_ve_raw.ppr_datapoints_raw`.
+
+### `timeseriesdata_datapoints_raw.py`
+
+* Reads time-series Excel files.
+* Transforms them into long-format DataFrames.
+* Aggregates relevant columns for Master table.
+* Writes output to Hive table `ti_ve_raw.timeseries_raw`.
+
+### `cef_results_raw.py`
+
+* Reads CEF Excel files.
+* Normalizes unit columns and metadata.
+* Writes results into `ti_ve_raw.cef_results_raw`.
+
+### `master_raw.py`
+
+* Reads `ppr_datapoints_raw`, `cef_results_raw`, and `timeseries_raw`.
+* Refers to `masterfile.xlsx` for column logic and source mapping.
+* Generates the unified DataFrame for the master Hive table.
+
+---
+
+## 6. Hive Script Descriptions
+
+### `hive_timeseries_anz.hql`
+
+* Creates Hive external table `ti_ve_raw.timeseries_raw`
+* Defines columns for time, pressure, temperature, and uptake metrics.
+
+### `hive_master_anz.hql`
+
+* Creates the Master Hive table `ti_ve_raw.masterfile`
+* Populates columns using Spark-generated master data.
+* Uses `STORED AS PARQUET` and `LOCATION '/user/svc-preprod/increment/aive/hte/master/'`.
+
+---
+
+## 7. Authentication and Security
+
+All Spark and Hive actions use Kerberos authentication.
+
+Example Spark configurations:
+
+```bash
+--conf spark.kerberos.keytab=/user/svc-preprod/keys/svc-preprod.keytab \
+--conf spark.kerberos.principal=svc-preprod@DOMAIN.COM
+```
+
+---
+
+## 8. Expected Output Tables
+
+| Table Name                     | Type  | Description                    |
+| ------------------------------ | ----- | ------------------------------ |
+| `ti_ve_raw.ppr_datapoints_raw` | Raw   | From PPR datapoints Excel      |
+| `ti_ve_raw.cef_results_raw`    | Raw   | From CEF results Excel         |
+| `ti_ve_raw.timeseries_raw`     | Raw   | From PPR timeseries Excel      |
+| `ti_ve_raw.masterfile`         | Final | Consolidated Master Hive table |
+
+---
+
+## 9. Execution Flow Summary
+
+1. PPR datapoints, CEF, and timeseries Excel files are placed in HDFS.
+2. Oozie triggers Spark ingestion scripts.
+3. Raw data tables are written into Hive.
+4. Masterfile logic merges all sources.
+5. Final Hive Master Table is created for analytics use.
+
+---
+
+## 10. Conclusion
+
+This Oozie workflow enables seamless ingestion and integration of multi-source experimental data into a unified Hive structure.
+It supports scalability, data lineage through Masterfile mapping, and consistent schema evolution for new datasets.
+
+---
+
+Would you like me to now generate the **PDF document** from this finalized content?
