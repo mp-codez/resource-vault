@@ -1,0 +1,153 @@
+Here is a clean, structured bullet-point logic summary created exactly in the style of the second picture, but based on your flowchart.
+
+
+---
+
+✅ Last Gasp Message – Logic Summary (Based on Flowchart)
+
+1. Check meter disconnected
+
+If the meter is already flagged as disconnected (master flag), skip notification and exit the flow.
+
+
+
+---
+
+2. Identify linked TR, F.L & MV feeding panel
+
+Map the meter to its Transformer (TR) and Feeder Line (F.L) (parent, child, and MV feeding panel).
+
+Use RMU parent reference to identify upstream components.
+
+
+
+---
+
+3. Check for priority consumer
+
+Determine if the TR has any priority consumers.
+
+If yes, apply stricter business rules.
+
+
+
+---
+
+4. Compute TR-level Last Gasp aggregation
+
+Check if 80% or more meters under the identified TR/F.L have sent a Last Gasp in the sliding window.
+
+If ≥80% → treat as a transformer-level outage candidate.
+
+If <80% → treat as individual meter event.
+
+
+
+---
+
+5. Planned WCA (Work Control Activity) validation
+
+Match the meter’s F.L / MV panel with any planned WCAs from APEX.
+
+Validate:
+
+1. F.L / MV panel matching
+
+
+2. WCA status = CDCC? (If yes → suppress notification)
+
+
+3. Date/time overlap between WCA schedule and meter event timestamp
+
+If overlapping → suppress notification.
+
+
+
+
+
+
+---
+
+6. Real-time / Unplanned WCA validation
+
+Pull real-time unplanned WCA/WCD data for the identified TR/F.L & MV panel.
+
+If real-time WCA indicates emergency or CDCC → do not notify.
+
+
+
+---
+
+7. Final classification
+
+If event does NOT match any planned or real-time WCA:
+
+Mark as unplanned outage.
+
+If WCA status = WCOM, mark accordingly.
+
+Generate notification message payload.
+
+Publish to notification topic.
+
+
+
+
+---
+
+8. Message Refresh & Power Restore Check
+
+Check for follow-up messages indicating power restored.
+
+Update final status accordingly.
+
+Refresh the status list (old + new messages).
+
+
+
+---
+
+Purpose
+
+Core enrichment and Last Gasp outage qualification.
+
+Ensures correct classification of planned, unplanned, priority, and emergency outage events.
+
+
+
+---
+
+Processing Steps
+
+1. Ingest events from lastgasp.raw
+
+
+2. Deduplicate by meter_id + timestamp
+
+
+3. Enrich with meter topology (TR, F.L, MV panel)
+
+
+4. Priority consumer check
+
+
+5. TR-level aggregation for Last Gasp %
+
+
+6. Cross-check planned WCA from APEX
+
+
+7. Check real-time WCA
+
+
+8. Apply rules & route to lastgasp.notification topic
+
+
+9. Audit – store intermediate decisions in HDFS/Kudu
+
+
+
+
+---
+
+If you want, I can also create this in PDF format exactly like the second picture.
