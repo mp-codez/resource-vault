@@ -1,0 +1,243 @@
+Great — thanks for the second diagram. Below I’ve rewritten the full, working data flow exactly as shown in your image (with the same step numbers), and included concrete implementation details, recommended topic/table names, and a troubleshooting checklist so you can fix the “not working” areas quickly.
+
+
+---
+
+✅ End-to-end flow (mapped to your diagram numbers)
+
+1. ITRON / HONEYWELL → TIBCO ESB
+
+Smart-meter events (last-gasp, alarms, telemetry) are sent from ITRON/Honeywell to TIBCO ESB.
+
+Format: JSON/AVRO over HTTP or JMS. Add a unique event_id, timestamp, meter_id, event_type, payload.
+
+
+2. TIBCO ESB → KAFKA (BDA)
+
+TIBCO publishes incoming events to Kafka topic raw.events in the BDA.
+
+Use a schema (Avro/JSON Schema) and Schema Registry to ensure producers/consumers agree.
+
+
+3 / 10. KAFKA → SPARK STREAMING (consumer)
+
+Spark Structured Streaming consumes from raw.events. Consumer group: spark-processor.
+
+Spark performs parsing, validation, enrichment (geo, transform fields), deduplication (by event_id).
+
+Checkpointing required (HDFS path) for fault tolerance.
+
+
+4. SPARK STREAMING → KAFKA (processed)
+
+After processing, Spark publishes to topic processed.events (or sap.requests) for downstream consumers and for NiFi.
+
+Use idempotent writes or transactions if you need exactly-once.
+
+
+5 / 11. SPARK STREAMING → KUDU (analytics store)
+
+Spark also writes enriched records to Kudu (or Kudu table events_kudu) for analytics and fast queries.
+
+Use upserts keyed by event_id for dedupe and late arrivals.
+
+
+6. KAFKA → NIFI (ingest for SAP)
+
+NiFi consumes from processed.events (topic sap.requests) using ConsumeKafka (or NiFi’s Kafka processors).
+
+NiFi converts message to required SAP payload (e.g., SOAP/REST/OData) and routes to the SAP endpoint.
+
+
+7. NIFI → SAP ENDPOINT (call)
+
+NiFi uses InvokeHTTP/InvokeSAP (custom) to POST to SAP endpoint. Add correlation id and handle synchronous responses.
+
+
+8. SAP ENDPOINT → SAP (internal processing)
+
+SAP endpoint accepts the request and inserts/updates inside SAP. SAP returns response status (success/fail) to caller (NiFi).
+
+
+9. SAP → KAFKA (status/ack)
+
+SAP or the SAP endpoint service publishes an acknowledgment/status message back to Kafka sap.responses (or processed.events.status) so system can track delivery/processing. This can be consumed by Spark/NiFi for retries/compensation.
+
+
+
+---
+
+Recommended topic & table names (example)
+
+raw.events — raw messages from ESB
+
+processed.events — after Spark enrichment/validation
+
+sap.requests — events prepared for SAP (can be same as processed)
+
+sap.responses — SAP acknowledgements / statuses
+
+Kudu table: events_kudu (primary key event_id)
+
+
+
+---
+
+Key implementation details & best practices
+
+Schema & serialization
+
+Use Avro/JSON Schema + Schema Registry.
+
+Include versioning in schema (schema_version).
+
+
+Spark Structured Streaming
+
+Source: kafka.bootstrap.servers, subscribe raw.events.
+
+maxOffsetsPerTrigger to control throughput.
+
+Checkpointing on HDFS: spark.sql.streaming.checkpointLocation = hdfs://.../checkpoints/spark-processor.
+
+Write to Kafka with kafka sink only after successful writes to Kudu to avoid data loss (or use Kafka transactions).
+
+
+Exactly-once / idempotency
+
+Deduplicate by event_id in Spark before writing to Kudu.
+
+Use idempotent writes in NiFi/SAP calls (include event_id so SAP ignores duplicates).
+
+
+Kudu writes
+
+Use upsert mode. Make partitioning and primary key design for query patterns.
+
+
+NiFi → SAP
+
+Use NiFi processors: ConsumeKafka → UpdateAttribute → InvokeHTTP (or custom SAP connector) → HandleHttpResponse.
+
+Use NiFi Provenance + backpressure + retry attempts. Configure a Dead Letter Queue (DLQ) for failed SAP calls.
+
+
+SAP acknowledgement
+
+SAP should push processing result to sap.responses topic (either directly via a Kafka producer service or via NiFi). This closes the loop.
+
+
+Security
+
+TLS for Kafka, Kerberos or SASL for cluster auth.
+
+ACLs: producers and consumers should have minimum privileges.
+
+
+Monitoring
+
+Kafka: consumer lag (Prometheus + Grafana).
+
+Spark: Streaming query progress, executor metrics.
+
+NiFi: provenance & queue lengths.
+
+Kudu: health & tablet server metrics.
+
+SAP: endpoint latency and success rate.
+
+
+
+---
+
+Troubleshooting checklist — common causes & fixes
+
+Symptoms: "nothing reaches Spark/Kudu/SAP"
+
+1. TIBCO to Kafka not writing → Check TIBCO logs, endpoint URL, Kafka broker connectivity, TLS/ACLs. Use kafka-console-consumer on raw.events.
+
+
+2. Schema mismatch → Producer writes Avro but no schema; consumers reject. Check Schema Registry and compatibility errors.
+
+
+3. Kafka topic partitions/retention misconfigured → messages dropped. Increase retention and partitions as needed.
+
+
+
+Spark processing failing 4. Checkpoint corruption → remove/repair checkpoint only after careful check; restart streaming with a fresh checkpoint for test environment.
+5. Consumer group offset problems → check spark-processor offsets and Kafka consumer lag.
+6. Serialization/deserialization exceptions → add robust exception handling and send bad records to DLQ topic.
+
+Writes to Kudu failing 7. Connection/auth issues → check Kudu master addresses and client configs.
+8. Primary key violation or schema mismatch → ensure Spark schema matches Kudu table schema.
+
+NiFi → SAP failures 9. Network/firewall blocking calls → test curl from NiFi host to SAP endpoint.
+10. SAP rejects payload → log request/response; compare expected SAP schema. Use NiFi LogAttribute for debugging.
+11. No retries or DLQ → enable retry strategy and route failed items to DLQ.
+
+Feedback loop missing 12. SAP not publishing to Kafka → confirm SAP has a connector or use NiFi to capture SAP response and publish to sap.responses.
+13. Duplicate processing → implement idempotency and dedupe logic.
+
+
+---
+
+Quick configuration checklist (do this first)
+
+[ ] Verify TIBCO → Kafka connectivity; confirm messages on raw.events.
+
+[ ] Check Schema Registry entries for schema versions.
+
+[ ] Ensure Spark consumer group spark-processor is reading raw.events.
+
+[ ] Confirm Spark checkpoint path is healthy and accessible.
+
+[ ] Verify Spark writes both to processed.events and Kudu successfully.
+
+[ ] Confirm NiFi has permission to consume processed.events and call SAP.
+
+[ ] Ensure SAP publishes ack to sap.responses (or NiFi picks up SAP's response and writes to Kafka).
+
+[ ] Monitor Kafka consumer lag and set alerts.
+
+
+
+---
+
+Minimal working example (runtime hints)
+
+Spark (read + write processed to Kafka)
+
+Use Structured Streaming:
+
+spark.readStream.format("kafka").option("subscribe", "raw.events")...
+
+Parse value with Avro/JSON schema
+
+Transform, dedupe
+
+Write Kudu via foreachBatch (upsert)
+
+After successful upsert, produce to processed.events with writeStream.format("kafka") and checkpointLocation.
+
+
+
+NiFi
+
+ConsumeKafka → RouteOnAttribute → InvokeHTTP (SAP) → PublishKafka to sap.responses (with SAP response).
+
+Configure Failure relationship to PutFile/DLQ.
+
+
+
+---
+
+If you want, I can now:
+
+(A) Produce a short runbook with exact commands and config snippets (Kafka topic creation commands, Spark options, NiFi processor config).
+
+(B) Draft NiFi flow XML template for ConsumeKafka → InvokeHTTP → PublishKafka.
+
+(C) Provide a sample Spark Structured Streaming notebook (code) that reads raw.events, dedupes, writes to Kudu and to processed.events.
+
+
+Which one should I do next? (A, B, or C)
