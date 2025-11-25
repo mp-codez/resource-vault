@@ -151,3 +151,121 @@ Processing Steps
 ---
 
 If you want, I can also create this in PDF format exactly like the second picture.
+
+
+______________
+Here is the complete flow explained clearly based on your diagram:
+
+
+---
+
+🔄 End-to-End Data Flow Explanation
+
+1️⃣ Smart Meters / RF Mesh
+
+Electricity smart meters installed at consumer premises.
+
+These meters communicate using RF Mesh network.
+
+When power goes off, the meter sends a “Last Gasp Message” immediately.
+
+100% of meters send these last-gasp alerts to the HES.
+
+
+
+---
+
+2️⃣ HES (Head-End System – Itron & Honeywell)
+
+HES receives all meter messages.
+
+It processes and forwards meter alerts.
+
+For critical alerts (e.g., power outage), HES generates a Gasp Message.
+
+Only 50% of these messages move forward to the next system (as per diagram).
+
+
+
+---
+
+3️⃣ TIBCO NRT (Near-Real Time System)
+
+TIBCO receives the filtered alerts from HES.
+
+TIBCO processes them in real-time.
+
+It sends Raw Alerts into the Big Data platform using Kafka.
+
+
+
+---
+
+4️⃣ Kafka (Real-Time Ingestion Layer)
+
+Kafka acts as the streaming pipeline.
+
+All real-time alerts from TIBCO are published to Kafka topics.
+
+These alerts are consumed by Big Data systems for processing.
+
+
+
+---
+
+5️⃣ BDA (Big Data Analytics Platform – HBase & Hive)
+
+RAW Zone → HBase
+
+First stop inside BDA is the RAW layer.
+
+Kafka messages are stored in HBase without modification.
+
+Purpose: Keep unprocessed, original alerts for compliance and replay.
+
+
+Curated Zone → Hive
+
+Raw alerts are then transformed, cleaned, and enriched.
+
+The processed data is stored in Hive tables.
+
+Purpose: Querying, reporting, and downstream analytics.
+
+
+
+---
+
+6️⃣ SAP HANA (Final Destination for Reporting)
+
+Curated Hive data is pushed into SAP HANA.
+
+Business users and dashboards use HANA for:
+
+Outage monitoring
+
+Performance analytics
+
+BI reporting
+
+Operational insights
+
+
+
+
+---
+
+📌 Summary in One Line
+
+Smart Meters → HES (Itron/Honeywell) → TIBCO NRT → Kafka → BDA (HBase RAW → Hive Curated) → SAP HANA
+
+
+---
+
+If you want, I can also create:
+
+✅ A clean PowerPoint slide
+✅ A Visio-style architecture diagram
+✅ A simplified explanation text for leadership
+
+Just tell me!
