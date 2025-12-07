@@ -1,0 +1,35 @@
+# Path where raw Excel files are kept
+# For HDFS example:
+raw_path: "file:/F:/data/raw_path"
+
+# Base path for curated output
+curated_base: "file:/F:/data/curated_base"
+
+# Base path for archived raw files
+archive_base: "file:/F:/data/archive_base"
+
+# Base path where error parquet/text files will be written
+error_base: "file:/F:/data/error_base"
+
+# Optional: substring to match in file name. "*" = all files
+file_glob: "*"
+
+# Allowed extensions (only Excel)
+extensions:
+  - xlsx
+  - xls
+
+# Excel options
+excel_infer_schema: false   # true if you want Spark to infer schema
+
+# Timezone for partitions / timestamps
+timezone: "UTC"
+
+# Output format for curated data: parquet or csv
+write_format: "parquet"
+
+# SaveMode for curated write: overwrite or append
+write_mode: "overwrite"
+
+# Whether to partition archive by date (yyyyMMdd)
+archive_partition_by_date: true
